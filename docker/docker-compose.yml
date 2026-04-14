@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: clinica_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_clinica_2024}
+      MYSQL_DATABASE: ${DB_NAME:-clinica_saas}
+      MYSQL_USER: ${DB_USER:-clinica_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-clinica_pass_2024}
+    ports:
+      - '3307:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'root', '-p${DB_ROOT_PASSWORD:-root_clinica_2024}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: clinica_redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: clinica_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: mysql://${DB_USER:-clinica_user}:${DB_PASSWORD:-clinica_pass_2024}@mysql:3306/${DB_NAME:-clinica_saas}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_change_in_production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    ports:
+      - '3001:3001'
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: clinica_frontend
+    restart: unless-stopped
+    environment:
+      NUXT_PUBLIC_API_URL: ${API_URL:-http://localhost:3001}
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  redis_data:
